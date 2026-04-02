@@ -13,7 +13,6 @@ library(tidyr)
 library(ggplot2)
 
 # 1.1 Load datasets
-setwd("C:/Users/jwest.INTERNAL/OneDrive - Bureau of Meteorology/Documents/Data/Economics/Agriculture/")
 tfp    <- read_csv("TFP_indexes.csv")
 output <- read_csv("Agricultural_Growth.csv")
 inputs <- read_csv("Ag_Indexes.csv")
