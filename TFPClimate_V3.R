@@ -1,4 +1,7 @@
 ## AGRICULTURE TFP - CLIMATE ANALYSIS
+## Jason West - Bureau of Meteorology, Brisbane, Australia
+## jason.west@bom.gov.au
+
 # Core time-series econometrics
 library(urca)      # Johansen cointegration, ca.jo
 library(vars)      # VAR / VECM tools
