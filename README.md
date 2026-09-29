@@ -6,7 +6,7 @@ This study examines system-level adjustment over 1961-2021 in four major agricul
 
 Using cointegration analysis and vector error-correction models, we distinguish short-run climate-driven deviations from long-run equilibrium relationships linking temperature anomalies and water-availability conditions to agricultural productivity and key production components. 
 
-Corrected estimates show statistically significant aggregate TFP equilibrium correction only in Sub-Saharan Africa, while Australia, North America, and Central Europe display weak or inconclusive TFP adjustment. 
+Corrected estimates provide clear evidence of aggregate TFP equilibrium correction only in Sub-Saharan Africa, while Australia, North America, and Central Europe display weak or inconclusive TFP adjustment.
 
 Component-level adjustment is more evident but concentrated in selected margins, especially fertiliser use and some livestock and capital-labour systems. 
 
