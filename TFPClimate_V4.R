@@ -14,8 +14,6 @@ library(tibble)
 library(uroot)       # ADF-GLS / ERS alternatives if available
 library(strucchange) # breakpoints / Chow-type tests
 
-setwd("C:/Users/jwest.INTERNAL/OneDrive - Bureau of Meteorology/Documents/Data/Economics/Agriculture/")
-
 tfp    <- read_csv("TFP_indexes.csv")
 output <- read_csv("Agricultural_Growth.csv")
 inputs <- read_csv("Ag_Indexes.csv")
