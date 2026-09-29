@@ -935,4 +935,331 @@ figures_out[["Central Europe"]]$plot
 figures_out[["Sub-Saharan Africa"]]$plot
 figures_out[["Australia"]]$plot
 
+##########################################
+## ------------------------------------------------------------------
+## 8. Weak-exogeneity LR tests for climate variables
+## ------------------------------------------------------------------
+## Null hypothesis:
+## Climate-variable adjustment/loading coefficients are jointly zero.
+##
+## In each 3-variable system:
+## row 1 = agricultural variable: TFP or Y
+## row 2 = TEMP
+## row 3 = SPEI
+##
+## H matrix selects/restricts adjustment rows.
+## For weak exogeneity of TEMP and SPEI, only agricultural adjustment
+## is unrestricted, while TEMP and SPEI adjustment loadings are restricted to zero.
+##
+## H = [1, 0, 0]' means only row 1 of alpha is unrestricted.
+
+## ------------------------------------------------------------------
+## Robust weak-exogeneity LR test function
+## ------------------------------------------------------------------
+
+weak_exog_test <- function(model, region, model_name) {
+  
+  joh <- model$johansen
+  r   <- model$rank
+  k   <- ncol(joh@x)
+  
+  ## This assumes variables are ordered as:
+  ## 1 = agricultural variable, 2 = TEMP, 3 = SPEI
+  ##
+  ## H allows only the agricultural equation to adjust.
+  ## TEMP and SPEI loading rows are restricted to zero.
+  H <- matrix(c(1, 0, 0), nrow = 3, ncol = 1)
+  
+  out <- tryCatch(
+    urca::alrtest(joh, A = H, r = r),
+    error = function(e) e
+  )
+  
+  if (inherits(out, "error")) {
+    return(tibble::tibble(
+      Region = region,
+      Model = model_name,
+      Rank = r,
+      Restrictions_df = NA_real_,
+      LR_statistic = NA_real_,
+      p_value = NA_real_,
+      Weak_exogeneity_supported_5pct = NA,
+      Conclusion = paste("Test failed:", out$message)
+    ))
+  }
+  
+  ## Number of alpha restrictions:
+  ## unrestricted alpha has k*r parameters;
+  ## restricted alpha has q*r parameters, where q = ncol(H).
+  ## Here q = 1, so restrictions = (3 - 1) * r = 2r.
+  df_lr <- (k - ncol(H)) * r
+  
+  lr_stat <- as.numeric(out@teststat)[1]
+  
+  ## Compute p-value manually rather than using out@pval,
+  ## because urca versions differ in how p-values are stored.
+  pval <- stats::pchisq(
+    q = lr_stat,
+    df = df_lr,
+    lower.tail = FALSE
+  )
+  
+  tibble::tibble(
+    Region = region,
+    Model = model_name,
+    Rank = r,
+    Restrictions_df = df_lr,
+    LR_statistic = lr_stat,
+    p_value = pval,
+    Weak_exogeneity_supported_5pct = pval >= 0.05,
+    Conclusion = dplyr::case_when(
+      pval < 0.05 ~ "Reject weak exogeneity of TEMP and SPEI",
+      TRUE ~ "Do not reject weak exogeneity of TEMP and SPEI"
+    )
+  )
+}
+
+tfp_weak_exog_table <- purrr::map_dfr(tfp_specs$region, function(r) {
+  weak_exog_test(
+    model = tfp_models[[r]],
+    region = r,
+    model_name = "TFP"
+  )
+})
+
+print(tfp_weak_exog_table)
+
+### Further Testing
+weak_exog_test_one <- function(model, region, model_name, variable = c("TEMP", "SPEI")) {
+  
+  variable <- match.arg(variable)
+  joh <- model$johansen
+  r   <- model$rank
+  k   <- ncol(joh@x)
+  
+  # Variable order: 1 = TFP/Y, 2 = TEMP, 3 = SPEI
+  
+  if (variable == "TEMP") {
+    # Allow agricultural variable and SPEI to adjust; restrict TEMP row to zero
+    H <- matrix(c(
+      1, 0,
+      0, 0,
+      0, 1
+    ), nrow = 3, ncol = 2, byrow = TRUE)
+  }
+  
+  if (variable == "SPEI") {
+    # Allow agricultural variable and TEMP to adjust; restrict SPEI row to zero
+    H <- matrix(c(
+      1, 0,
+      0, 1,
+      0, 0
+    ), nrow = 3, ncol = 2, byrow = TRUE)
+  }
+  
+  out <- tryCatch(
+    urca::alrtest(joh, A = H, r = r),
+    error = function(e) e
+  )
+  
+  if (inherits(out, "error")) {
+    return(tibble::tibble(
+      Region = region,
+      Model = model_name,
+      Restricted_variable = variable,
+      Rank = r,
+      Restrictions_df = NA_real_,
+      LR_statistic = NA_real_,
+      p_value = NA_real_,
+      Conclusion = paste("Test failed:", out$message)
+    ))
+  }
+  
+  df_lr <- (k - ncol(H)) * r
+  lr_stat <- as.numeric(out@teststat)[1]
+  pval <- stats::pchisq(lr_stat, df = df_lr, lower.tail = FALSE)
+  
+  tibble::tibble(
+    Region = region,
+    Model = model_name,
+    Restricted_variable = variable,
+    Rank = r,
+    Restrictions_df = df_lr,
+    LR_statistic = lr_stat,
+    p_value = pval,
+    Conclusion = ifelse(
+      pval < 0.05,
+      paste("Reject weak exogeneity of", variable),
+      paste("Do not reject weak exogeneity of", variable)
+    )
+  )
+}
+
+tfp_weak_exog_separate <- purrr::map_dfr(tfp_specs$region, function(r) {
+  dplyr::bind_rows(
+    weak_exog_test_one(tfp_models[[r]], r, "TFP", "TEMP"),
+    weak_exog_test_one(tfp_models[[r]], r, "TFP", "SPEI")
+  )
+})
+
+print(tfp_weak_exog_separate)
+
+## ------------------------------------------------------------------
+## 9. Conditional ECM robustness checks for TFP systems
+## ------------------------------------------------------------------
+## Purpose:
+## Estimate a parsimonious single-equation ECM for TFP, treating climate
+## variables as physically external conditioning variables.
+##
+## Model:
+## dTFP_t = lambda * ECT_{t-1} + gamma1*dTEMP_t + gamma2*dSPEI_t + error_t
+##
+## ECT is obtained from the long-run relation:
+## TFP_t = alpha + beta1*TEMP_t + beta2*SPEI_t + u_t
+## ------------------------------------------------------------------
+
+library(broom)
+library(sandwich)
+library(lmtest)
+
+estimate_conditional_ecm_tfp <- function(region,
+                                         temp_series = region,
+                                         spei_series = region,
+                                         use_hac = TRUE) {
+  
+  df <- tibble::tibble(
+    Year = years,
+    TFP  = log(tfp[[region]]),
+    TEMP = temp.w[[temp_series]],
+    SPEI = spei.w[[spei_series]]
+  ) |>
+    tidyr::drop_na() |>
+    dplyr::arrange(Year)
+  
+  ## Long-run relationship
+  lr_fit <- lm(TFP ~ TEMP + SPEI, data = df)
+  
+  ## Conditional ECM data
+  ecm_df <- df |>
+    dplyr::mutate(
+      ECT = resid(lr_fit),
+      ECT_lag = dplyr::lag(ECT, 1),
+      dTFP  = TFP - dplyr::lag(TFP, 1),
+      dTEMP = TEMP - dplyr::lag(TEMP, 1),
+      dSPEI = SPEI - dplyr::lag(SPEI, 1)
+    ) |>
+    tidyr::drop_na()
+  
+  ## Conditional ECM
+  ecm_fit <- lm(dTFP ~ ECT_lag + dTEMP + dSPEI, data = ecm_df)
+  
+  ## Use HAC/Newey-West standard errors by default
+  if (use_hac) {
+    vc <- sandwich::NeweyWest(ecm_fit, lag = 1, prewhite = FALSE, adjust = TRUE)
+    coef_tab <- lmtest::coeftest(ecm_fit, vcov. = vc)
+    
+    tidy_tab <- broom::tidy(coef_tab) |>
+      dplyr::rename(
+        estimate = estimate,
+        std.error = std.error,
+        statistic = statistic,
+        p.value = p.value
+      )
+  } else {
+    tidy_tab <- broom::tidy(ecm_fit)
+  }
+  
+  ## Model diagnostics
+  glance_tab <- broom::glance(ecm_fit)
+  
+  ## Return only the key ECM coefficient plus compact diagnostics
+  ect_row <- tidy_tab |>
+    dplyr::filter(term == "ECT_lag") |>
+    dplyr::mutate(
+      Region = region,
+      temp_series = temp_series,
+      spei_series = spei_series,
+      n_obs = nobs(ecm_fit),
+      adj_r_squared = glance_tab$adj.r.squared,
+      residual_se = glance_tab$sigma,
+      Interpretation = dplyr::case_when(
+        estimate < 0 & p.value < 0.05 ~ "Negative and significant at 5%",
+        estimate < 0 & p.value < 0.10 ~ "Negative and significant at 10%",
+        estimate < 0 ~ "Negative but not significant",
+        TRUE ~ "Non-negative"
+      )
+    )
+  
+  list(
+    region = region,
+    long_run_model = lr_fit,
+    ecm_model = ecm_fit,
+    ecm_data = ecm_df,
+    ect_result = ect_row,
+    full_results = tidy_tab
+  )
+}
+
+conditional_ecm_models <- purrr::pmap(
+  list(tfp_specs$region, tfp_specs$temp_series, tfp_specs$spei_series),
+  ~ estimate_conditional_ecm_tfp(
+    region = ..1,
+    temp_series = ..2,
+    spei_series = ..3,
+    use_hac = TRUE
+  )
+)
+
+names(conditional_ecm_models) <- tfp_specs$region
+
+conditional_ecm_table <- purrr::map_dfr(
+  conditional_ecm_models,
+  "ect_result"
+)
+
+print(conditional_ecm_table)
+
+format_stars <- function(p) {
+  dplyr::case_when(
+    p < 0.01 ~ "***",
+    p < 0.05 ~ "**",
+    p < 0.10 ~ "*",
+    TRUE ~ ""
+  )
+}
+
+conditional_ecm_appendix <- conditional_ecm_table |>
+  dplyr::mutate(
+    stars = format_stars(p.value),
+    ECM_cell = paste0(
+      sprintf("%.3f", estimate),
+      stars,
+      " (",
+      sprintf("%.3f", std.error),
+      ")"
+    ),
+    p_value = dplyr::case_when(
+      p.value < 0.001 ~ "<0.001",
+      TRUE ~ sprintf("%.3f", p.value)
+    ),
+    adj_r_squared = sprintf("%.3f", adj_r_squared),
+    residual_se = sprintf("%.3f", residual_se)
+  ) |>
+  dplyr::select(
+    Region,
+    ECM_cell,
+    p_value,
+    n_obs,
+    adj_r_squared,
+    Interpretation
+  ) |>
+  dplyr::arrange(Region)
+
+print(conditional_ecm_appendix)
+
+readr::write_csv(
+  conditional_ecm_appendix,
+  "Appendix_Table_Conditional_ECM_TFP_Robustness.csv"
+)
+
 
